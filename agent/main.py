@@ -217,16 +217,24 @@ async def run_prompt(req: PromptRequest, x_api_key: str = Header(None)):
         f"- RUNNING PROCESSES: {', '.join(sys.get('running_processes', []))}\n\n"
         "ACTION HISTORY:\n"
         f"{history_str}\n\n"
-        "TASK: Complete the user's request. USE THE SYSTEM CONTEXT to verify if an app is already open. If you see 'brave' in running processes, do NOT try to start it again—just type or click.\n\n"
+        "ALLOWED ACTIONS (STRICTLY USE THESE ONLY):\n"
+        "1. 'execute_shell': Run Powershell command. Use for launching apps (e.g., 'start brave'). Require 'command' field.\n"
+        "2. 'type': Type text. Require 'parameters': {'text': '...'}.\n"
+        "3. 'click': Click mouse. Optional 'parameters': {'x': ..., 'y': ...}. If omitted, clicks current pos.\n"
+        "4. 'press': Press single key (e.g., 'enter'). Require 'parameters': {'key': '...'}.\n"
+        "5. 'hotkey': Multiple keys (e.g., ['win', 'r']). Require 'parameters': {'keys': [...]}.\n"
+        "6. 'wait': Wait seconds. Require 'parameters': {'seconds': ...}.\n"
+        "7. 'done': Task finished. Require 'parameters': {'message': '...'}.\n\n"
         "STRICT RULES:\n"
-        "1. DO NOT REPEAT actions that have already succeeded or are visible in the System Context.\n"
-        "2. If the user says 'open brave' but brave is ALREADY in Running Processes, move to the next sub-task (like navigating to a URL).\n"
-        "3. Output ONLY valid JSON.\n\n"
+        "1. USE 'execute_shell' with 'command' field for ANY system command like opening File Explorer (start explorer.exe) or launching browsers.\n"
+        "2. DO NOT REPEAT actions that have already succeeded or are visible in the System Context.\n"
+        "3. If an app is already in Running Processes, move to the next logical step.\n"
+        "4. Output ONLY valid JSON.\n\n"
         "OUTPUT FORMAT (STRICT JSON):\n"
         "{\n"
         "  \"thought\": \"Verify system state and decide NEXT PROGRESSIVE step\",\n"
-        "  \"action\": \"action_name\",\n"
-        "  \"command\": \"powershell command if applicable\",\n"
+        "  \"action\": \"one of the allowed action names above\",\n"
+        "  \"command\": \"powershell command if using execute_shell, else null\",\n"
         "  \"parameters\": {}\n"
         "}\n"
     )
@@ -345,11 +353,36 @@ async def approve_action(req: ApprovalRequest, x_api_key: str = Header(None)):
     output = ""
     
     try:
-        if action == "execute_shell":
+        # Robustness: Map common hallucinations to standard actions
+        action_mapping = {
+            "run_command": "execute_shell",
+            "execute": "execute_shell",
+            "run": "execute_shell",
+            "start_process": "execute_shell",
+            "shell": "execute_shell",
+            "open": "execute_shell"
+        }
+        
+        effective_action = action_mapping.get(action, action)
+        
+        if effective_action == "execute_shell":
             command = action_data.get("command")
+            if not command and effective_action != action:
+                # If the hallucinated action passed the command in parameters
+                command = params.get("command") or params.get("path")
+            
+            if not command:
+                raise ValueError("No command provided for shell execution")
+
             await manager.broadcast_log(f"Executing: {command}")
             # Use shell=True for 'start' and other built-ins, but safely via powershell
-            result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True, timeout=20)
+            # We use 'Start-Process' or 'start' for opening files/folders to avoid blocking
+            if "explorer" in command.lower() or command.lower().startswith("start "):
+                full_cmd = f"powershell -Command \"{command}\""
+            else:
+                full_cmd = f"powershell -Command \"{command}\""
+                
+            result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=20, shell=True)
             stdout = result.stdout if result.stdout is not None else ""
             stderr = result.stderr if result.stderr is not None else ""
             output = stdout + stderr
