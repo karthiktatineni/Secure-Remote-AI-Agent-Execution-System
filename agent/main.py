@@ -375,14 +375,8 @@ async def approve_action(req: ApprovalRequest, x_api_key: str = Header(None)):
                 raise ValueError("No command provided for shell execution")
 
             await manager.broadcast_log(f"Executing: {command}")
-            # Use shell=True for 'start' and other built-ins, but safely via powershell
-            # We use 'Start-Process' or 'start' for opening files/folders to avoid blocking
-            if "explorer" in command.lower() or command.lower().startswith("start "):
-                full_cmd = f"powershell -Command \"{command}\""
-            else:
-                full_cmd = f"powershell -Command \"{command}\""
-                
-            result = subprocess.run(full_cmd, capture_output=True, text=True, timeout=20, shell=True)
+            # Use list-based execution for safety against injection and quoting issues
+            result = subprocess.run(["powershell", "-Command", command], capture_output=True, text=True, timeout=20)
             stdout = result.stdout if result.stdout is not None else ""
             stderr = result.stderr if result.stderr is not None else ""
             output = stdout + stderr
