@@ -119,16 +119,20 @@ async def websocket_logs(websocket: WebSocket, token: str = Query(None)):
 
 @app.websocket("/ws/screen")
 async def websocket_screen(websocket: WebSocket, token: str = Query(None)):
+    logger.info(f"Screen WebSocket connecting... Token provided: {'Yes' if token else 'No'}")
     if API_KEY and token != API_KEY:
+        logger.warning("Screen WebSocket connection rejected: Invalid Key")
         await websocket.close(code=1008)
         return
     await manager.connect_screen(websocket)
+    logger.info("Screen WebSocket connected.")
     sct = mss.mss()
     monitor = sct.monitors[1]
     
     try:
         while True:
             sct_img = sct.grab(monitor)
+            # logger.info(f"Frame captured, size: {sct_img.size}") # Too noisy for prod, keep commented but available
             img = Image.frombytes("RGB", sct_img.size, sct_img.bgra, "raw", "BGRX")
             frame = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
             frame = cv2.resize(frame, (1280, 720))
@@ -153,22 +157,23 @@ def get_system_context():
         
         processes = []
         try:
-            # Quick check for running browsers/apps via PowerShell
-            output = subprocess.check_output('powershell "Get-Process | Where-Object {$_.MainWindowTitle} | Select-Object ProcessName | ConvertTo-Json"', shell=True, text=True)
+            output = subprocess.check_output('powershell "Get-Process | Where-Object {$_.MainWindowTitle} | Select-Object ProcessName, MainWindowTitle | ConvertTo-Json"', shell=True, text=True)
             if output:
                 import json
                 procs = json.loads(output)
                 if isinstance(procs, list):
-                    processes = list(set([p['ProcessName'] for p in procs]))
+                    processes = [f"{p['ProcessName']} ({p['MainWindowTitle']})" for p in procs if p.get('MainWindowTitle')]
                 else:
-                    processes = [procs['ProcessName']]
+                    processes = [f"{procs['ProcessName']} ({procs['MainWindowTitle']})"] if procs.get('MainWindowTitle') else []
         except: pass
         
         return {
             "active_window": active_window,
-            "running_processes": processes[:20]
+            "running_processes": list(set(processes))[:25]
         }
-    except: return {}
+    except Exception as e:
+        logger.error(f"Context gathering error: {e}")
+        return {}
 
 @app.post("/run")
 async def run_prompt(req: PromptRequest, x_api_key: str = Header(None)):
