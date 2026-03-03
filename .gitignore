@@ -1,0 +1,18 @@
+# Sensitive files
+.env
+.env.local
+agent/.env
+frontend/.env.local
+
+# Python
+agent/venv/
+agent/__pycache__/
+*.pyc
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# OS files
+.DS_Store
+Thumbs.db
