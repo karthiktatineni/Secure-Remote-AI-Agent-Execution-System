@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface PendingAction {
   action_id: string;
@@ -18,18 +19,34 @@ export default function Home() {
   const [isThinking, setIsThinking] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
   const websocketLogRef = useRef<WebSocket | null>(null);
   const websocketScreenRef = useRef<WebSocket | null>(null);
+  const router = useRouter();
 
-  // Use environment variables for API and key
-  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-  const API_KEY = process.env.NEXT_PUBLIC_AGENT_API_KEY || '';
+  // Use environment variables for API and local storage for key
+  const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://back.tatinenikarthik.online';
 
   useEffect(() => {
+    const token = localStorage.getItem('agent_token');
+    if (!token) {
+      router.push('/login');
+    } else {
+      setIsAuthenticated(true);
+      setupWebSockets(token);
+    }
+
+    return () => {
+      websocketLogRef.current?.close();
+      websocketScreenRef.current?.close();
+    };
+  }, []);
+
+  const setupWebSockets = (token: string) => {
     // Determine WS protocol based on API URL
     const wsBase = API_BASE.replace(/^http/, 'ws');
-    const wsSuffix = API_KEY ? `?token=${API_KEY}` : '';
+    const wsSuffix = `?token=${token}`;
 
     // Log WebSocket
     const logWs = new WebSocket(`${wsBase}/ws/logs${wsSuffix}`);
@@ -49,12 +66,14 @@ export default function Home() {
       }
     };
     websocketScreenRef.current = screenWs;
+  };
 
-    return () => {
-      logWs.close();
-      screenWs.close();
-    };
-  }, [API_BASE, API_KEY]);
+  const handleLogout = () => {
+    localStorage.removeItem('agent_token');
+    router.push('/login');
+  };
+
+  const getApiKey = () => localStorage.getItem('agent_token') || '';
 
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -62,12 +81,13 @@ export default function Home() {
 
   const triggerNextStep = async (sessId: string, originalPrompt: string) => {
     setIsThinking(true);
+    const token = getApiKey();
     try {
       const res = await fetch(`${API_BASE}/run`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': API_KEY
+          'X-API-Key': token
         },
         body: JSON.stringify({ prompt: originalPrompt, session_id: sessId }),
       });
@@ -94,12 +114,13 @@ export default function Home() {
 
     setIsThinking(true);
     setLogs((prev) => [...prev, `[System]: Starting new task: ${activePrompt}`]);
+    const token = getApiKey();
     try {
       const res = await fetch(`${API_BASE}/run`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': API_KEY
+          'X-API-Key': token
         },
         body: JSON.stringify({ prompt: activePrompt }),
       });
@@ -131,12 +152,13 @@ export default function Home() {
 
     const originalPrompt = prompt || logs.find(l => l.includes('Starting new task:'))?.split(': ').pop() || "";
 
+    const token = getApiKey();
     try {
       const res = await fetch(`${API_BASE}/approve`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-API-Key': API_KEY
+          'X-API-Key': token
         },
         body: JSON.stringify({
           action_id: pendingAction.action_id,
@@ -176,9 +198,17 @@ export default function Home() {
             ANTIGRAVITY PC AGENT
           </h1>
         </div>
-        <div className="text-xs text-slate-400 uppercase tracking-widest font-semibold flex gap-4">
-          <span>Ollama: llama3.2</span>
-          <span>Screen: 720p 10fps</span>
+        <div className="flex items-center gap-6">
+          <div className="text-xs text-slate-400 uppercase tracking-widest font-semibold flex gap-4">
+            <span>Ollama: llama3.2</span>
+            <span>Screen: 720p 10fps</span>
+          </div>
+          <button
+            onClick={handleLogout}
+            className="text-xs font-bold text-red-400 hover:text-red-300 transition-colors uppercase tracking-tighter bg-red-500/10 px-3 py-1.5 rounded-lg border border-red-500/20"
+          >
+            Logout
+          </button>
         </div>
       </header>
 

@@ -30,6 +30,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 API_KEY = os.getenv("AGENT_API_KEY")
+AGENT_USERNAME = os.getenv("AGENT_USERNAME", "admin")
+AGENT_PASSWORD = os.getenv("AGENT_PASSWORD", "password")
+
 if not API_KEY:
     logger.warning("AGENT_API_KEY not set! Backend is INSECURE.")
 
@@ -43,12 +46,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Security check for todas the requests
+# Security check for all requests
 from fastapi import Header, Query
 async def verify_api_key(x_api_key: str = Header(None), token: str = Query(None)):
     provided_key = x_api_key or token
     if API_KEY and provided_key != API_KEY:
+        logger.warning(f"Auth failed: expected {API_KEY[:5]}..., got {provided_key[:5] if provided_key else 'None'}...")
         raise HTTPException(status_code=403, detail="Forbidden: Invalid API Key")
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+@app.post("/login")
+async def login(req: LoginRequest):
+    if req.username == AGENT_USERNAME and req.password == AGENT_PASSWORD:
+        return {"status": "success", "token": API_KEY}
+    raise HTTPException(status_code=401, detail="Invalid credentials")
 
 # Configuration for Lightning AI (GPT-120B)
 LIGHTNING_BASE_URL = os.getenv("LIGHTNING_BASE_URL", "https://lightning.ai/api/v1/")
